@@ -1,0 +1,8 @@
+pymupdf
+langchain-mistralai
+langchain-huggingface
+langchain-community
+langchain-chroma
+chromadb
+python-dotenv
+streamlit
