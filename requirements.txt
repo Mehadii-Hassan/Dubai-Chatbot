@@ -6,3 +6,4 @@ langchain-chroma
 chromadb
 python-dotenv
 streamlit
+sentence-transformers
