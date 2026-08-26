@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="Real Estate Smart Consultant", page_icon="🏢", layout="centered")
 st.title("🏢 Real Estate Smart RAG Chatbot")
-st.write("Hello! I am your personal real estate assistant. Feel free to ask me anything about the property details or layouts!")
+st.write("Welcome! Feel free to ask any questions about the project property specifications, locations, or architecture layout designs.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -20,7 +20,9 @@ if "messages" not in st.session_state:
 # Render previous dialogue history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        st.write(msg["content"])
+        # Display saved text output safely (stripping hidden structural tags if any)
+        display_content = msg["content"].split("|||")[0] if "|||" in msg["content"] else msg["content"]
+        st.write(display_content)
         if "images" in msg and msg["images"]:
             for img in msg["images"]:
                 st.image(img, use_container_width=True)
@@ -39,43 +41,53 @@ if user_input := st.chat_input("Ask me anything..."):
         
         status_placeholder.empty()
         
-        # 1. Stream the core description text first
-        full_response = st.write_stream(text_stream)
+        # Capture the raw streamed text entirely
+        complete_llm_output = ""
+        text_placeholder = st.empty()
         
-        # 2. Render the matched image exactly below the description
+        for chunk in text_stream:
+            complete_llm_output += chunk.content
+            # Live stream the text buildup silently without showing final isolated lines prematurely
+            text_placeholder.markdown(complete_llm_output)
+            
+        # Parse the output into Core Description vs AI Generated Closing Question
+        # Looking for double newline or question mark breakdown structures safely
+        lines = complete_llm_output.strip().split("\n\n")
+        
+        core_description = lines[0]
+        ai_closing_question = lines[-1] if len(lines) > 1 else ""
+        
+        # If model failed to split properly with double newline, scan dynamically
+        if not ai_closing_question and "?" in complete_llm_output:
+            sentences = complete_llm_output.split("?")
+            ai_closing_question = sentences[-2].strip() + "?" if len(sentences) > 1 else ""
+            core_description = complete_llm_output.replace(ai_closing_question, "").strip()
+
+        # Step 1: Render ONLY the elite descriptive block initially
+        text_placeholder.markdown(core_description)
+        
+        # Step 2: Smoothly inject the verified brochure image asset right below
         if final_images:
             for img_path in final_images:
                 st.image(img_path, use_container_width=True)
         
-        # 3. PURE DYNAMIC POST-IMAGE ENGAGEMENT ENGINE
-        # Generate custom questions based on what the user originally asked, shown AFTER the picture
-        query_lower = user_input.lower()
-        follow_up_question = "Would you like to explore more details about this section?" # Default fallback
-        
-        if any(w in query_lower for w in ["layout", "floor", "plan", "2 bhk", "3 bhk", "bedroom", "flat"]):
-            follow_up_question = "✨ Would you like to explore the amenities or pricing plans next?"
-        elif any(w in query_lower for w in ["map", "location", "route", "where", "situated"]):
-            follow_up_question = "✨ Shall I guide you through the structural master design plan next?"
-        elif any(w in query_lower for w in ["amenities", "facilities", "pool", "gym", "spa"]):
-            follow_up_question = "✨ Would you like to check the available apartment floor layouts now?"
-            
-        st.write("") # Tiny visual spacing block
-        
-        # Stream the follow-up question smoothly to grab customer attention right after looking at the image
-        question_placeholder = st.empty()
-        typed_text = ""
-        for word in follow_up_question.split(" "):
-            typed_text += word + " "
-            question_placeholder.markdown(f"**{typed_text}**")
-            time.sleep(0.08) # Simulates natural premium human typing speed
-            
-        # Append the follow-up question seamlessly into the final saved text record
-        full_response += f"\n\n{follow_up_question}"
+        # Step 3: Stream the AI's completely unique follow-up question AFTER the image display loop
+        if ai_closing_question:
+            st.write("") # Spacer block
+            question_placeholder = st.empty()
+            typed_text = ""
+            for word in ai_closing_question.split(" "):
+                typed_text += word + " "
+                question_placeholder.markdown(f"*{typed_text.strip()}*")
+                time.sleep(0.07) # Natural typing rhythm speed delay simulation
+                
+        # Consolidate the entire raw payload response back safely into history lists
+        final_history_text = f"{core_description}\n\n{ai_closing_question}"
                 
     logger.info(f"QUESTION: '{user_input}' | DELIVERED_IMAGE: {final_images if final_images else 'None'}")
                     
     st.session_state.messages.append({
         "role": "assistant", 
-        "content": full_response, 
+        "content": final_history_text, 
         "images": final_images
     })
