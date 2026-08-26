@@ -15,32 +15,31 @@ if "SSL_CERT_FILE" in os.environ:
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
 
-# Using Mistral Small exactly as requested for lightweight, fast stream responses
+# Using optimized mistral-small exactly as requested for fast streams and JSON compliance
 llm = ChatMistralAI(model="mistral-small-latest", temperature=0.1)
 
 def ask_dynamic_rag_stream(user_query, chat_history):
     """Answers queries dynamically and uses advanced AI reasoning to select pure architectural assets without any hardcoding."""
     
     # 1. Retrieve the top textual context nodes
-    text_docs = db.similarity_search(user_query, k=4, filter={"type": "text"})
+    text_docs = db.similarity_search(user_query, k=3, filter={"type": "text"})
     context_chunks = [doc.page_content for doc in text_docs]
     context = "\n\n".join(context_chunks)
     
-    # DYNAMIC EXPANSION: Pull a wider pool of image summaries from the database to expand choices for the AI Router
+    # 2. Retrieve a wider pool of image summaries from the database to expand choices
     image_docs = db.similarity_search(user_query, k=15, filter={"type": "image"})
     candidate_images_pool = []
     
     for doc in image_docs:
         path = doc.metadata.get("image_path")
         if path:
-            # Avoid duplicate paths in the candidate pool safely
             if not any(item["image_path"] == path for item in candidate_images_pool):
                 candidate_images_pool.append({
                     "image_path": path,
                     "description": doc.page_content
                 })
             
-    # 2. Premium Consultant Chat System Prompt Setup
+    # 3. Premium Consultant Chat System Prompt Setup
     system_instructions = f"""
     You are the premium sales consultant for 'The Pinnacle at Sobha Central'.
 
@@ -73,17 +72,16 @@ def ask_dynamic_rag_stream(user_query, chat_history):
     formatted_messages.append(HumanMessage(content=user_query))
     text_stream = llm.stream(formatted_messages)
     
-    # 3. PURE AI DYNAMIC ROUTING & FILTERING ENGINE (100% Non-Hardcoded)
+    # 4. PURE AI DYNAMIC ROUTING & FILTERING ENGINE (100% Non-Hardcoded)
     final_image_paths = []
     
     if candidate_images_pool:
-        # We enforce strict enterprise-level real estate domain rules directly inside the AI router prompt
         re_rank_prompt = f"""You are a professional real estate asset analyzer and image routing system.
         Evaluate the user's active query, the chat history context, and analyze the candidate images pool provided in the JSON array below.
         
         CRITICAL REASONING & ROUTING RULES:
         1. ASSET TARGETING: Select exactly ONE image path that represents a core real estate asset matching the query intent. This must be a location map, floor layout plan, 3D architectural rendering, tower structure view, or physical community amenities (like pools or gyms).
-        2. MANDATORY PURGING: You must actively REJECT any images whose summaries focus on human faces, lifestyle models, families, decorative stock characters, musical instruments (like violins), abstract artwork, text templates, or corporate branding logos. These are completely irrelevant to property layout or destination search queries.
+        2. MANDATORY PURGING: You must actively REJECT any images whose summaries focus on human faces, lifestyle models, families, couples, decorative stock characters, musical instruments (like violins), abstract artwork, text templates, or corporate branding logos. These are completely irrelevant to property layout or destination search queries.
         
         Available Images Pool:
         {json.dumps(candidate_images_pool, indent=2)}
@@ -91,9 +89,7 @@ def ask_dynamic_rag_stream(user_query, chat_history):
         User Query: {user_query}
         
         Respond ONLY with a valid JSON object containing a single key "selected_path". Do not include markdown wraps, code blocks, or extra text.
-        Example format:
-        {{"selected_path": "extracted_data/images/page_1_img_1.png"}}
-        If no images strictly match the conversation theme, pick the highest-ranking pure architectural exterior/interior render from the pool.
+        Format: {{"selected_path": "extracted_data/images/page_1_img_1.png"}}
         """
         
         try:
@@ -101,13 +97,15 @@ def ask_dynamic_rag_stream(user_query, chat_history):
             parsed_json = json.loads(re_rank_response.content.strip())
             selected_path = parsed_json.get("selected_path", "")
             
-            if selected_path and os.path.exists(selected_path):
+            if selected_path and os.environ.get("MISTRAL_API_KEY") and os.path.exists(selected_path):
                 final_image_paths.append(selected_path)
         except Exception:
             pass
 
-        # Safe dynamic programmatic fallback to the first clean asset in the pool if JSON validation fails
+        # FIXED: Structural string index extractor applied safely during pure programmatic fallback routing
         if not final_image_paths and candidate_images_pool:
-            final_image_paths.append(candidate_images_pool[0]["image_path"])
+            fallback_target = candidate_images_pool[0]["image_path"]
+            if os.path.exists(fallback_target):
+                final_image_paths.append(fallback_target)
 
     return text_stream, final_image_paths
