@@ -16,9 +16,7 @@ db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
 llm = ChatMistralAI(model="mistral-small-latest", temperature=0.3)
 
 def ask_dynamic_rag_stream(user_query, chat_history):
-    """Answers queries dynamically using user's premium prompt and orchestrates AI-driven image re-ranking."""
-    
-    # 1. Retrieve the top 7 elements to guarantee a wide pool of candidate images
+    """Answers queries dynamically and strips the follow-up question so it can be handled after the image in UI."""
     retrieved_docs = db.similarity_search(user_query, k=7)
     
     context_chunks = []
@@ -38,7 +36,7 @@ def ask_dynamic_rag_stream(user_query, chat_history):
                 
     context = "\n\n".join(context_chunks)
     
-    # 2. INTEGRATED YOUR PREMIUM UPGRADED PROMPT (Slightly tuned for clean text generation)
+    # PREMIUM UPGRADED PROMPT (Follow-up question rule removed to handle via frontend)
     system_instructions = f"""
     You are the premium sales consultant for 'The Pinnacle at Sobha Central'.
 
@@ -54,11 +52,7 @@ def ask_dynamic_rag_stream(user_query, chat_history):
        - "You can see the 3-bedroom layout below."
        - "The clubhouse rendering is displayed below."
     4. Write in a premium, elegant, brochure-like tone that builds excitement without sounding pushy.
-    5. Whenever appropriate, end with a short follow-up question that encourages the next interaction.
-       Examples:
-       - "Would you like to explore the floor plans?"
-       - "Shall I show you the amenities?"
-       - "Interested in the payment plan?"
+    5. CRITICAL: Do NOT include any closing or follow-up questions at the very end of your response. Just finish your core description naturally.
 
     Brochure Context:
     {context}
@@ -75,33 +69,23 @@ def ask_dynamic_rag_stream(user_query, chat_history):
     formatted_messages.append(HumanMessage(content=user_query))
     text_stream = llm.stream(formatted_messages)
     
-    # 3. PURE AI IMAGE RE-RANKER (Remains 100% Dynamic - No manual rules)
     final_image_paths = []
-    
     if candidate_images_pool:
         re_rank_prompt = f"""You are an expert image retrieval router. Analyze the user's current query and the chat history context.
         From the JSON array of available images below, pick exactly ONE image that is the most relevant visual asset to accompany the answer.
-        - If the user asks for a map/location, select a map.
-        - If the user asks for a layout/floor plan, select that specific floor plan.
-        - If the user asks about amenities or general project features, select a relevant facility, rendering, or lifestyle image.
         
         Available Images:
         {json.dumps(candidate_images_pool, indent=2)}
         
         User Query: {user_query}
         
-        CRITICAL: Respond ONLY with a valid JSON containing a single key "selected_path". Do not include markdown blocks or extra text.
-        Example response format:
-        {{"selected_path": "extracted_data/images/page_1_img_1.png"}}
-        If absolutely no images match the topic, respond with:
-        {{"selected_path": ""}}"""
-        
+        CRITICAL: Respond ONLY with a valid JSON containing a single key "selected_path".
+        Format: {{"selected_path": "extracted_data/images/page_1_img_1.png"}}
+        """
         try:
             re_rank_response = llm.invoke([HumanMessage(content=re_rank_prompt)], response_format={"type": "json_object"})
-            raw_content = re_rank_response.content.strip()
-            parsed_json = json.loads(raw_content)
+            parsed_json = json.loads(re_rank_response.content.strip())
             selected_path = parsed_json.get("selected_path", "")
-            
             if selected_path and os.path.exists(selected_path):
                 final_image_paths.append(selected_path)
         except Exception:
