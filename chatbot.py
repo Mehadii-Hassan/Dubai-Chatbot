@@ -15,31 +15,32 @@ if "SSL_CERT_FILE" in os.environ:
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
 
-# Using optimized mistral-small exactly as requested for fast streams and JSON compliance
+# Using Mistral Small exactly as requested for lightweight, fast stream responses
 llm = ChatMistralAI(model="mistral-small-latest", temperature=0.1)
 
 def ask_dynamic_rag_stream(user_query, chat_history):
     """Answers queries dynamically and uses advanced AI reasoning to select pure architectural assets without any hardcoding."""
     
     # 1. Retrieve the top textual context nodes
-    text_docs = db.similarity_search(user_query, k=3, filter={"type": "text"})
+    text_docs = db.similarity_search(user_query, k=4, filter={"type": "text"})
     context_chunks = [doc.page_content for doc in text_docs]
     context = "\n\n".join(context_chunks)
     
-    # 2. Retrieve a wider pool of image summaries from the database to expand choices
+    # DYNAMIC EXPANSION: Pull a wider pool of image summaries from the database to expand choices for the AI Router
     image_docs = db.similarity_search(user_query, k=15, filter={"type": "image"})
     candidate_images_pool = []
     
     for doc in image_docs:
         path = doc.metadata.get("image_path")
         if path:
+            # Avoid duplicate paths in the candidate pool safely
             if not any(item["image_path"] == path for item in candidate_images_pool):
                 candidate_images_pool.append({
                     "image_path": path,
                     "description": doc.page_content
                 })
             
-    # 3. Premium Consultant Chat System Prompt Setup
+    # 2. Premium Consultant Chat System Prompt Setup
     system_instructions = f"""
     You are the premium sales consultant for 'The Pinnacle at Sobha Central'.
 
@@ -72,10 +73,11 @@ def ask_dynamic_rag_stream(user_query, chat_history):
     formatted_messages.append(HumanMessage(content=user_query))
     text_stream = llm.stream(formatted_messages)
     
-    # 4. PURE AI DYNAMIC ROUTING & FILTERING ENGINE (100% Non-Hardcoded)
+    # 3. PURE AI DYNAMIC ROUTING & FILTERING ENGINE (100% Non-Hardcoded)
     final_image_paths = []
     
     if candidate_images_pool:
+        # We enforce strict enterprise-level real estate domain rules directly inside the AI router prompt
         re_rank_prompt = f"""You are a professional real estate asset analyzer and image routing system.
         Evaluate the user's active query, the chat history context, and analyze the candidate images pool provided in the JSON array below.
         
@@ -89,23 +91,30 @@ def ask_dynamic_rag_stream(user_query, chat_history):
         User Query: {user_query}
         
         Respond ONLY with a valid JSON object containing a single key "selected_path". Do not include markdown wraps, code blocks, or extra text.
-        Format: {{"selected_path": "extracted_data/images/page_1_img_1.png"}}
+        Example format:
+        {{"selected_path": "extracted_data/images/page_1_img_1.png"}}
+        If no images strictly match the conversation theme, pick the highest-ranking pure architectural exterior/interior render from the pool.
         """
         
         try:
             re_rank_response = llm.invoke([HumanMessage(content=re_rank_prompt)], response_format={"type": "json_object"})
-            parsed_json = json.loads(re_rank_response.content.strip())
+            raw_content = re_rank_response.content.strip()
+            parsed_json = json.loads(raw_content)
             selected_path = parsed_json.get("selected_path", "")
             
-            if selected_path and os.environ.get("MISTRAL_API_KEY") and os.path.exists(selected_path):
+            # SANITIZATION: Clean up the path strings from any accidental slashes or quotes added by AI
+            selected_path = selected_path.replace("\\", "/").replace('"', '').replace("'", "").strip()
+            
+            if selected_path and os.path.exists(selected_path):
                 final_image_paths.append(selected_path)
         except Exception:
             pass
 
-        # FIXED: Structural string index extractor applied safely during pure programmatic fallback routing
+        # SAFE PROGRAMMATIC FALLBACK: Using the exact integer list accessor index [0] to protect Streamlit from crashing
         if not final_image_paths and candidate_images_pool:
-            fallback_target = candidate_images_pool[0]["image_path"]
-            if os.path.exists(fallback_target):
-                final_image_paths.append(fallback_target)
+            fallback_path = candidate_images_pool[0]["image_path"]
+            fallback_path = fallback_path.replace("\\", "/").strip()
+            if os.path.exists(fallback_path):
+                final_image_paths.append(fallback_path)
 
     return text_stream, final_image_paths
