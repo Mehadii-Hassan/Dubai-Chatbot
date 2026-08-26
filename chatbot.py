@@ -11,32 +11,36 @@ load_dotenv()
 if "SSL_CERT_FILE" in os.environ:
     del os.environ["SSL_CERT_FILE"]
 
+# Initialize identical embeddings and load database
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 db = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
-llm = ChatMistralAI(model="mistral-small-latest", temperature=0.3)
+
+# Using Mistral Small exactly as requested for lightweight, fast stream responses
+llm = ChatMistralAI(model="mistral-small-latest", temperature=0.1)
 
 def ask_dynamic_rag_stream(user_query, chat_history):
-    """Answers queries dynamically and strips the follow-up question so it can be handled after the image in UI."""
-    retrieved_docs = db.similarity_search(user_query, k=7)
+    """Answers queries dynamically and uses advanced AI reasoning to select pure architectural assets without any hardcoding."""
     
-    context_chunks = []
+    # 1. Retrieve the top textual context nodes
+    text_docs = db.similarity_search(user_query, k=4, filter={"type": "text"})
+    context_chunks = [doc.page_content for doc in text_docs]
+    context = "\n\n".join(context_chunks)
+    
+    # DYNAMIC EXPANSION: Pull a wider pool of image summaries from the database to expand choices for the AI Router
+    image_docs = db.similarity_search(user_query, k=15, filter={"type": "image"})
     candidate_images_pool = []
     
-    for doc in retrieved_docs:
-        if doc.metadata.get("type") == "text":
-            context_chunks.append(doc.page_content)
-        elif doc.metadata.get("type") == "image":
-            context_chunks.append(doc.page_content) 
-            path = doc.metadata.get("image_path")
-            if path:
+    for doc in image_docs:
+        path = doc.metadata.get("image_path")
+        if path:
+            # Avoid duplicate paths in the candidate pool safely
+            if not any(item["image_path"] == path for item in candidate_images_pool):
                 candidate_images_pool.append({
                     "image_path": path,
                     "description": doc.page_content
                 })
-                
-    context = "\n\n".join(context_chunks)
-    
-    # PREMIUM UPGRADED PROMPT (Follow-up question rule removed to handle via frontend)
+            
+    # 2. Premium Consultant Chat System Prompt Setup
     system_instructions = f"""
     You are the premium sales consultant for 'The Pinnacle at Sobha Central'.
 
@@ -44,15 +48,14 @@ def ask_dynamic_rag_stream(user_query, chat_history):
     Make every conversation feel like the client is browsing a luxury real estate brochure.
 
     RULES:
-    1. Keep every answer short, energetic, and engaging (maximum 2-3 short bullets or sentences).
-    2. Answer ONLY using the brochure context below. Never invent information.
-    3. Naturally reference that a stunning project visual, layout plan, map, or render has been displayed for them below.
-       Examples:
-       - "I've shown the master plan below."
-       - "You can see the 3-bedroom layout below."
-       - "The clubhouse rendering is displayed below."
-    4. Write in a premium, elegant, brochure-like tone that builds excitement without sounding pushy.
-    5. CRITICAL: Do NOT include any closing or follow-up questions at the very end of your response. Just finish your core description naturally.
+    1. RESPONSE LENGTH & TONE: Write a beautifully crafted description of about 2 to 4 full, descriptive sentences. Do not make it too short, robotic, or dry. It must feel warm, sophisticated, and premium.
+    2. STRICT NO EMOJI POLICY: Do not use any emojis, icons, or decorative symbols anywhere in your response. Keep it strictly textual and professional.
+    3. FACTUAL BOUNDARY: Answer ONLY using the factual brochure context provided below. Never invent or hallucinate information.
+    4. IMAGE REFERENCE: Naturally mention that a relevant architectural visual, layout plan, map, or rendering from that brochure section has been brought up below.
+    5. THE CLOSING QUESTION GENERATOR: At the very end of your response, separate it by a double newline, and create a completely unique, contextually relevant, and highly captivating follow-up question. This question must motivate the user and make them eager to discover the next part of their dream home. 
+       - If discussing location, ask about master layout plans or lifestyle amenities.
+       - If discussing layouts, ask about wellness facilities or tower features.
+       Never repeat the exact same closing question across turns.
 
     Brochure Context:
     {context}
@@ -64,32 +67,47 @@ def ask_dynamic_rag_stream(user_query, chat_history):
         if msg["role"] == "user":
             formatted_messages.append(HumanMessage(content=msg["content"]))
         elif msg["role"] == "assistant":
-            formatted_messages.append(AIMessage(content=msg["content"]))
+            content_to_append = msg["content"].split("|||") if "|||" in msg["content"] else msg["content"]
+            formatted_messages.append(AIMessage(content=content_to_append))
             
     formatted_messages.append(HumanMessage(content=user_query))
     text_stream = llm.stream(formatted_messages)
     
+    # 3. PURE AI DYNAMIC ROUTING & FILTERING ENGINE (100% Non-Hardcoded)
     final_image_paths = []
+    
     if candidate_images_pool:
-        re_rank_prompt = f"""You are an expert image retrieval router. Analyze the user's current query and the chat history context.
-        From the JSON array of available images below, pick exactly ONE image that is the most relevant visual asset to accompany the answer.
+        # We enforce strict enterprise-level real estate domain rules directly inside the AI router prompt
+        re_rank_prompt = f"""You are a professional real estate asset analyzer and image routing system.
+        Evaluate the user's active query, the chat history context, and analyze the candidate images pool provided in the JSON array below.
         
-        Available Images:
+        CRITICAL REASONING & ROUTING RULES:
+        1. ASSET TARGETING: Select exactly ONE image path that represents a core real estate asset matching the query intent. This must be a location map, floor layout plan, 3D architectural rendering, tower structure view, or physical community amenities (like pools or gyms).
+        2. MANDATORY PURGING: You must actively REJECT any images whose summaries focus on human faces, lifestyle models, families, decorative stock characters, musical instruments (like violins), abstract artwork, text templates, or corporate branding logos. These are completely irrelevant to property layout or destination search queries.
+        
+        Available Images Pool:
         {json.dumps(candidate_images_pool, indent=2)}
         
         User Query: {user_query}
         
-        CRITICAL: Respond ONLY with a valid JSON containing a single key "selected_path".
-        Format: {{"selected_path": "extracted_data/images/page_1_img_1.png"}}
+        Respond ONLY with a valid JSON object containing a single key "selected_path". Do not include markdown wraps, code blocks, or extra text.
+        Example format:
+        {{"selected_path": "extracted_data/images/page_1_img_1.png"}}
+        If no images strictly match the conversation theme, pick the highest-ranking pure architectural exterior/interior render from the pool.
         """
+        
         try:
             re_rank_response = llm.invoke([HumanMessage(content=re_rank_prompt)], response_format={"type": "json_object"})
             parsed_json = json.loads(re_rank_response.content.strip())
             selected_path = parsed_json.get("selected_path", "")
+            
             if selected_path and os.path.exists(selected_path):
                 final_image_paths.append(selected_path)
         except Exception:
-            if candidate_images_pool:
-                final_image_paths.append(candidate_images_pool[0]["image_path"])
+            pass
+
+        # Safe dynamic programmatic fallback to the first clean asset in the pool if JSON validation fails
+        if not final_image_paths and candidate_images_pool:
+            final_image_paths.append(candidate_images_pool[0]["image_path"])
 
     return text_stream, final_image_paths
